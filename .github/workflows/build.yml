@@ -14,10 +14,45 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y live-build debootstrap squashfs-tools xorriso isolinux qemu-user-static binfmt-support coreutils wget ca-certificates
 
-      - name: Build ISO using Fixed Configuration
+      - name: Build ISO using Fixed Qwen Logic
         run: |
           sudo lb clean --purge
-          # Запускаем сборку — live-build автоматически подхватит исправленный auto/config из репозитория!
+          
+          # 1. Создаем скрипт авто-конфигурации live-build (без ограничений по вариантам бутстрапа)
+          mkdir -p auto
+          cat << 'EOF' > auto/config
+          #!/bin/bash
+          lb config noauto \
+              --architecture i386 \
+              --bootstrap-qemu-architecture i386 \
+              --bootstrap-qemu-static /usr/bin/qemu-i386-static \
+              --binary-images iso-hybrid \
+              --debian-installer live \
+              --distribution bookworm \
+              --archive-areas "main contrib non-free non-free-firmware" \
+              --linux-flavours 686-pae \
+              --compression zstd \
+              --mode debian \
+              --system live \
+              --security true \
+              --updates true
+          EOF
+          chmod +x auto/config
+
+          # 2. Создаем список твоих программ (GNOME Core, браузер, утилиты)
+          mkdir -p config/package-lists
+          cat << 'EOF' > config/package-lists/desktop.list.chroot
+          xorg gdm3 gnome-core nautilus gnome-terminal gnome-text-editor gnome-control-center network-manager-gnome
+          firefox-esr
+          htop cava fastfetch gnome-system-monitor
+          fonts-dejavu fonts-liberation locales
+          EOF
+
+          # 3. Добавляем генерацию локалей для поддержки русского и татарского языков
+          mkdir -p config/includes.chroot/etc
+          echo -e "en_US.UTF-8 UTF-8\nru_RU.UTF-8 UTF-8\ntt_RU.UTF-8 UTF-8" > config/includes.chroot/etc/locale.gen
+
+          # Запуск сборки с правами root
           sudo lb config
           sudo lb build
 
