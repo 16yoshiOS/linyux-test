@@ -12,12 +12,12 @@ jobs:
         run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update
-          sudo apt-get install -y live-build debootstrap squashfs-tools xorriso isolinux qemu-user-static binfmt-support
+          sudo apt-get install -y live-build debootstrap squashfs-tools xorriso isolinux qemu-user-static binfmt-support coreutils wget ca-certificates
 
-      - name: Build ISO using Qwen configuration
+      - name: Build ISO using Fixed Configuration
         run: |
           sudo lb clean --purge
-          # Утилита автоматически подхватит папки config и скрипты, созданные Qwen
+          # Запускаем сборку — live-build автоматически подхватит исправленный auto/config из репозитория!
           sudo lb config
           sudo lb build
 
