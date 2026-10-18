@@ -8,53 +8,69 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install build tools and architecture support
+      - name: Set up QEMU for i386 emulation
         run: |
-          sudo dpkg --add-architecture i386
           sudo apt-get update
-          sudo apt-get install -y live-build debootstrap squashfs-tools xorriso isolinux qemu-user-static binfmt-support coreutils wget ca-certificates
+          sudo apt-get install -y qemu-user-static binfmt-support
 
-      - name: Build ISO using Fixed Qwen Logic
+      - name: Create Isolated Docker build environment
         run: |
-          sudo lb clean --purge
-          
-          # 1. Создаем скрипт авто-конфигурации live-build (без ограничений по вариантам бутстрапа)
-          mkdir -p auto
-          cat << 'EOF' > auto/config
-          #!/bin/bash
-          lb config noauto \
-              --architecture i386 \
-              --bootstrap-qemu-architecture i386 \
-              --bootstrap-qemu-static /usr/bin/qemu-i386-static \
-              --binary-images iso-hybrid \
-              --debian-installer live \
-              --distribution bookworm \
-              --archive-areas "main contrib non-free non-free-firmware" \
-              --linux-flavours 686-pae \
-              --compression zstd \
-              --mode debian \
-              --system live \
-              --security true \
-              --updates true
+          # Создаем Dockerfile прямо на лету, чтобы гарантировать наличие live-build внутри
+          cat << 'EOF' > Dockerfile.build
+          FROM debian:bookworm
+          RUN dpkg --add-architecture i386 && \
+              apt-get update && \
+              apt-get install -y live-build debootstrap squashfs-tools xorriso isolinux coreutils wget ca-certificates
+          WORKDIR /workspace
           EOF
-          chmod +x auto/config
+          docker build -t linyux-builder -f Dockerfile.build .
 
-          # 2. Создаем список твоих программ (GNOME Core, браузер, утилиты)
-          mkdir -p config/package-lists
-          cat << 'EOF' > config/package-lists/desktop.list.chroot
-          xorg gdm3 gnome-core nautilus gnome-terminal gnome-text-editor gnome-control-center network-manager-gnome
-          firefox-esr
-          htop cava fastfetch gnome-system-monitor
-          fonts-dejavu fonts-liberation locales
-          EOF
+      - name: Run Build inside Privileged Container (Bypass CAP_SYS_ADMIN)
+        run: |
+          # Запускаем контейнер с флагом --privileged. Это дает ПОЛНЫЙ доступ к mount!
+          docker run --privileged \
+            -v ${{ github.workspace }}:/workspace \
+            linyux-builder bash -c "
+              lb clean --purge
+              
+              # Воспроизводим чистый конфиг от Qwen без minimal/minbase флагов
+              mkdir -p auto
+              cat << 'EON' > auto/config
+              #!/bin/bash
+              lb config noauto \
+                  --architecture i386 \
+                  --bootstrap-qemu-architecture i386 \
+                  --bootstrap-qemu-static /usr/bin/qemu-i386-static \
+                  --binary-images iso-hybrid \
+                  --debian-installer live \
+                  --distribution bookworm \
+                  --archive-areas 'main contrib non-free non-free-firmware' \
+                  --linux-flavours 686-pae \
+                  --compression zstd \
+                  --mode debian \
+                  --system live \
+                  --security true \
+                  --updates true
+              EON
+              chmod +x auto/config
 
-          # 3. Добавляем генерацию локалей для поддержки русского и татарского языков
-          mkdir -p config/includes.chroot/etc
-          echo -e "en_US.UTF-8 UTF-8\nru_RU.UTF-8 UTF-8\ntt_RU.UTF-8 UTF-8" > config/includes.chroot/etc/locale.gen
+              # Список твоих программ (Чистый GNOME, утилиты, локали)
+              mkdir -p config/package-lists
+              cat << 'EON' > config/package-lists/desktop.list.chroot
+              xorg gdm3 gnome-core nautilus gnome-terminal gnome-text-editor gnome-control-center network-manager-gnome
+              firefox-esr
+              htop cava fastfetch gnome-system-monitor
+              fonts-dejavu fonts-liberation locales
+              EON
 
-          # Запуск сборки с правами root
-          sudo lb config
-          sudo lb build
+              # Локализация
+              mkdir -p config/includes.chroot/etc
+              echo -e 'en_US.UTF-8 UTF-8\nru_RU.UTF-8 UTF-8\ntt_RU.UTF-8 UTF-8' > config/includes.chroot/etc/locale.gen
+
+              # Погнали собирать ISO
+              lb config
+              lb build
+            "
 
       - name: Upload ISO Artifact
         uses: actions/upload-artifact@v4
