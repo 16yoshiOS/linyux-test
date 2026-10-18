@@ -1,0 +1,28 @@
+name: Build Linyux OS ISO
+on: [push, workflow_dispatch]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install build tools and architecture support
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y live-build debootstrap squashfs-tools xorriso isolinux qemu-user-static binfmt-support
+
+      - name: Build ISO using Qwen configuration
+        run: |
+          sudo lb clean --purge
+          # Утилита автоматически подхватит папки config и скрипты, созданные Qwen
+          sudo lb config
+          sudo lb build
+
+      - name: Upload ISO Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LinyuxOS-Debian-12-i686
+          path: "*.iso"
